@@ -30,11 +30,10 @@ func (i *arrayFlags) Set(value string) error {
 
 var command = flag.String("c", "", "command to be executed")
 
-var asyncArgs arrayFlags
-
+var concArgs arrayFlags
 
 func main() {
-	flag.Var(&asyncArgs, "a", "async commands to be executed concurrently")
+	flag.Var(&concArgs, "a", "files to be executed concurrently")
 	flag.Parse()
 	err := runAll()
 	if e, ok := err.(interp.ExitStatus); ok {
@@ -47,7 +46,7 @@ func main() {
 }
 
 func runAll() error {
-	errChan := make(chan error, len(asyncArgs))
+	errChan := make(chan error, len(concArgs))
 
 	r, err := interp.New(interp.StdIO(os.Stdin, os.Stdout, os.Stderr))
 	if err != nil {
@@ -70,13 +69,13 @@ func runAll() error {
 		}
 	}
 
-	for _, arg := range asyncArgs {
+	for _, arg := range concArgs {
 		go func(p string){
 			errChan <- runPath(r, p)
 		}(arg)
 	}
 
-	for i := 0; i < len(asyncArgs); i++ {
+	for i := 0; i < len(concArgs); i++ {
 		if err = <-errChan; err != nil {
 			return err
 		}
