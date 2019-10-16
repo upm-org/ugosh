@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -20,11 +21,48 @@ import (
 type arrayFlags []string
 
 func (i *arrayFlags) String() string {
-	return strings.Join(*i, ", ")
+	return fmt.Sprintf("%v", *i)
 }
 
 func (i *arrayFlags) Set(value string) error {
-	*i = append(*i, value)
+	*i = strings.Split(value, ",")
+	return nil
+}
+
+type concErrors []error
+
+func (e *concErrors) HasError() bool {
+	hasError := false
+	for _, err := range *e {
+		if err != nil {
+			hasError = true
+			break
+		}
+	}
+	return hasError
+}
+
+func (e *concErrors) Add(err error) {
+	*e = append(*e, err)
+}
+
+func (e *concErrors) GetError() error {
+	var b strings.Builder
+	hasError := false
+
+	for _, err := range *e {
+		if err != nil {
+			b.Grow(len(err.Error()) + 1)
+			b.WriteString(err.Error())
+			b.WriteRune('\n')
+			hasError = true
+		}
+	}
+
+	if hasError {
+		return errors.New(b.String())
+	}
+
 	return nil
 }
 
@@ -33,7 +71,7 @@ var command = flag.String("c", "", "command to be executed")
 var concArgs arrayFlags
 
 func main() {
-	flag.Var(&concArgs, "a", "files to be executed concurrently")
+	flag.Var(&concArgs, "a", "files to be executed concurrently (separated by comma)")
 	flag.Parse()
 	err := runAll()
 	if e, ok := err.(interp.ExitStatus); ok {
@@ -48,37 +86,45 @@ func main() {
 func runAll() error {
 	errChan := make(chan error, len(concArgs))
 
-	r, err := interp.New(interp.StdIO(os.Stdin, os.Stdout, os.Stderr))
+	seqRunner, err := interp.New(interp.StdIO(os.Stdin, os.Stdout, os.Stderr))
 	if err != nil {
 		return err
 	}
 
 	if *command != "" {
-		return run(r, strings.NewReader(*command), "")
+		return run(seqRunner, strings.NewReader(*command), "")
 	}
-	if flag.NArg() == 0 {
+	if flag.NArg() == 0 && flag.NFlag() == 0 {
 		if terminal.IsTerminal(int(os.Stdin.Fd())) {
-			return runInteractive(r, os.Stdin, os.Stdout, os.Stderr)
+			return runInteractive(seqRunner, os.Stdin, os.Stdout, os.Stderr)
 		}
-		return run(r, os.Stdin, "")
+		return run(seqRunner, os.Stdin, "")
 	}
 
 	for _, path := range flag.Args() {
-		if err := runPath(r, path); err != nil {
+		if err := runPath(seqRunner, path); err != nil {
 			return err
 		}
 	}
 
 	for _, arg := range concArgs {
 		go func(p string){
-			errChan <- runPath(r, p)
+			concRunner, err := interp.New(interp.StdIO(os.Stdin, os.Stdout, os.Stderr))
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			errChan <- runPath(concRunner, p)
 		}(arg)
 	}
 
+	errs := &concErrors{}
 	for i := 0; i < len(concArgs); i++ {
-		if err = <-errChan; err != nil {
-			return err
-		}
+		errs.Add(<-errChan)
+	}
+	if err = errs.GetError(); err != nil {
+		return err
 	}
 
 	return nil
