@@ -17,9 +17,24 @@ import (
 	"mvdan.cc/sh/v3/syntax"
 )
 
+type arrayFlags []string
+
+func (i *arrayFlags) String() string {
+	return strings.Join(*i, ", ")
+}
+
+func (i *arrayFlags) Set(value string) error {
+	*i = append(*i, value)
+	return nil
+}
+
 var command = flag.String("c", "", "command to be executed")
 
+var asyncArgs arrayFlags
+
+
 func main() {
+	flag.Var(&asyncArgs, "a", "async commands to be executed concurrently")
 	flag.Parse()
 	err := runAll()
 	if e, ok := err.(interp.ExitStatus); ok {
@@ -32,6 +47,8 @@ func main() {
 }
 
 func runAll() error {
+	errChan := make(chan error, len(asyncArgs))
+
 	r, err := interp.New(interp.StdIO(os.Stdin, os.Stdout, os.Stderr))
 	if err != nil {
 		return err
@@ -46,11 +63,25 @@ func runAll() error {
 		}
 		return run(r, os.Stdin, "")
 	}
+
 	for _, path := range flag.Args() {
 		if err := runPath(r, path); err != nil {
 			return err
 		}
 	}
+
+	for _, arg := range asyncArgs {
+		go func(p string){
+			errChan <- runPath(r, p)
+		}(arg)
+	}
+
+	for i := 0; i < len(asyncArgs); i++ {
+		if err = <-errChan; err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
