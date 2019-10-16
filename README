@@ -1,2 +1,8 @@
 This project is a fork of https://github.com/mvdan 's sh/cmd/gosh package, but with concurrent functionality.
 Maintained to be used in UPM and it's subsystems.
+
+To build run:
+
+	go mod init gosh; go get mvdan.cc/sh/v3/cmd/gosh
+	./gosh --help
+
