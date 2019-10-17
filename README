@@ -6,3 +6,6 @@ To build run:
 	go mod init gosh; go get mvdan.cc/sh/v3/cmd/gosh
 	./gosh --help
 
+To run scripts concurrently pass -a option
+	./gosh -a s1.sh,s2.sh,s3.sh
+
